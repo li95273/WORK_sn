@@ -26,13 +26,15 @@ class DBManager:
         try:
             conn = self.conn()
             cursor = conn.cursor()
-            # 确保字段名称统一使用log_time
+            # 修改表结构，添加sn字段，方便直接通过SN查询
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS error_logs (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     username VARCHAR(255),
+                    sn VARCHAR(100),
                     error_message TEXT,
-                    log_time DATETIME
+                    log_time DATETIME,
+                    INDEX idx_sn (sn)
                 )
             ''')
             conn.commit()
@@ -43,17 +45,17 @@ class DBManager:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
 
-    def log_error(self, username, error_msg):
+    def log_error(self, username, sn, error_msg):
         conn = None
         cursor = None
         try:
             conn = self.conn()
             cursor = conn.cursor()
-            # 添加log_time字段值
+            # 添加sn字段，单独存储SN信息
             query = """INSERT INTO error_logs 
-                    (username, error_message, log_time) 
-                    VALUES (%s, %s, %s)"""
-            values = (username, error_msg, datetime.now())
+                    (username, sn, error_message, log_time) 
+                    VALUES (%s, %s, %s, %s)"""
+            values = (username, sn, error_msg, datetime.now())
             cursor.execute(query, values)
             conn.commit()
             print("日志写入成功")
@@ -126,6 +128,28 @@ class DBManager:
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
+    def get_error_by_sn(self, sn):
+        """通过SN直接查询错误信息"""
+        conn = None
+        cursor = None
+        try:
+            conn = self.conn()
+            cursor = conn.cursor()
+            query = """
+                SELECT id, username, sn, error_message, log_time
+                FROM error_logs
+                WHERE sn = %s
+                ORDER BY log_time DESC
+            """
+            cursor.execute(query, (sn,))
+            return cursor.fetchall()
+        except mysql.connector.Error as e:
+            print(f"查询失败: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn and conn.is_connected(): conn.close()
+
 # 使用示例     
 if __name__ == "__main__":
     db = DBManager()
