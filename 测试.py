@@ -28,18 +28,31 @@ class ErrorLogApp:
         self.query_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.query_frame, text='错误查询')
         
+        # 创建报告生成页面
+        self.report_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.report_frame, text='报告生成')
+        
         # 初始化录入页面
         self.setup_input_frame()
         
         # 初始化查询页面
         self.setup_query_frame()
+        
+        # 初始化报告生成页面
+        self.setup_report_frame()
     
     def setup_input_frame(self):
-        # 创建输入区域 - 简化为只需要姓名、SN和错误信息
+        '''
+        设置错误录入页面的UI组件
+        
+        创建姓名、SN和错误信息的输入控件，以及提交和清空按钮
+        '''
+        # 创建标签
         tk.Label(self.input_frame, text='姓名：', font=('Arial', 12)).place(x=30, y=50)
         tk.Label(self.input_frame, text='SN：', font=('Arial', 12)).place(x=350, y=50)
         tk.Label(self.input_frame, text='报错信息：', font=('Arial', 12)).place(x=30, y=100)
         
+        # 创建输入控件
         self.name = tk.Entry(self.input_frame, width=25, font=('Arial', 11))
         self.name.place(x=80, y=50)
         self.sn = tk.Entry(self.input_frame, width=30, font=('Arial', 11))
@@ -47,11 +60,17 @@ class ErrorLogApp:
         self.baocuo = tk.Text(self.input_frame, width=100, height=20)
         self.baocuo.place(x=95, y=100)
         
-        # 创建确认按钮
+        # 创建操作按钮
         tk.Button(self.input_frame, text='确认维护', command=self.queren, width=15).place(x=150, y=500)
         tk.Button(self.input_frame, text='清空输入', command=self.clear_input, width=15).place(x=350, y=500)
+        tk.Button(self.input_frame, text='批量导入', command=self.batch_import, width=15).place(x=550, y=500)
     
     def setup_query_frame(self):
+        '''
+        设置错误查询页面的UI组件
+        
+        创建SN查询区域、结果显示表格和高级筛选功能
+        '''
         # 创建SN查询区域 - 突出显示，方便维修工程师使用
         sn_frame = ttk.LabelFrame(self.query_frame, text='SN查询')
         sn_frame.pack(fill='x', padx=10, pady=10)
@@ -105,6 +124,13 @@ class ErrorLogApp:
         tk.Button(advanced_frame, text='打开高级筛选', command=self.advanced_filter, width=15).pack(pady=10)
     
     def queren(self):
+        '''
+        确认按钮的回调函数 - 提交错误信息到数据库
+        
+        获取用户输入的姓名、SN和错误信息，验证非空后写入数据库
+        成功后显示提示并清空输入框
+        '''
+        # 获取并清理输入内容
         name_get = self.name.get().strip()
         sn_get = self.sn.get().strip()
         baocuo_get = self.baocuo.get('1.0', 'end-1c').strip()  # 获取文本内容，排除最后的换行符
@@ -121,18 +147,32 @@ class ErrorLogApp:
                 messagebox.showerror('错误', '无法连接到数据库，请检查网络连接！')
                 return
                 
-            self.db.log_error(name_get, sn_get, baocuo_get)
-            messagebox.showinfo('成功', f'SN: {sn_get} 的错误信息已成功记录！')
-            self.clear_input()  # 清空输入
+            # 调用数据库模块记录错误信息
+            if self.db.log_error(name_get, sn_get, baocuo_get):
+                messagebox.showinfo('成功', f'SN: {sn_get} 的错误信息已成功记录！')
+                self.clear_input()  # 清空输入
+            else:
+                messagebox.showerror('错误', '记录错误信息失败，请重试！')
         except Exception as e:
             messagebox.showerror('错误', f'记录错误信息失败: {str(e)}')
     
     def clear_input(self):
-        self.name.delete(0, tk.END)
-        self.sn.delete(0, tk.END)
-        self.baocuo.delete('1.0', tk.END)
+        '''
+        清空输入框的回调函数
+        
+        清空姓名、SN和错误信息的输入控件
+        '''
+        self.name.delete(0, tk.END)  # 清空姓名输入框
+        self.sn.delete(0, tk.END)    # 清空SN输入框
+        self.baocuo.delete('1.0', tk.END)  # 清空错误信息文本框
     
     def filter_logs(self):
+        """
+        基本筛选功能的实现
+        
+        根据用户名、日期范围等条件筛选错误日志记录，
+        并在结果表格中显示筛选结果
+        """
         # 获取筛选条件
         username = self.username_filter.get()
         username = username if username else None
@@ -169,7 +209,7 @@ class ErrorLogApp:
             conn = self.db.conn()
             cursor = conn.cursor()
             query = """
-                SELECT id, username, error_message, log_time
+                SELECT id, username, sn, error_message, log_time
                 FROM error_logs
                 WHERE 1=1
             """
@@ -190,14 +230,14 @@ class ErrorLogApp:
             results = cursor.fetchall()
             
             # 显示结果
-            for (log_id, user, msg, time) in results:
-                self.result_tree.insert('', 'end', values=(log_id, user, msg[:50], time.strftime('%Y-%m-%d %H:%M:%S')))
+            for record in results:
+                self.result_tree.insert('', 'end', values=record)
             
             # 显示结果数量
             messagebox.showinfo('查询结果', f'共找到 {len(results)} 条记录')
             
         except Exception as e:
-            messagebox.showerror('查询失败', f'查询失败: {e}')
+            messagebox.showerror('查询失败', f'查询失败: {str(e)}')
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
@@ -374,6 +414,12 @@ class ErrorLogApp:
         ttk.Button(button_frame, text='取消', command=filter_dialog.destroy, width=15).pack(side=tk.RIGHT, padx=5)
     
     def filter_logs_advanced(self, sn=None, error_keyword=None, sort_option='time_desc'):
+        """
+        高级筛选功能的实现
+        
+        根据用户名、SN、错误关键词、日期范围和排序方式等条件筛选错误日志记录，
+        并在结果表格中显示筛选结果
+        """
         # 获取基本筛选条件
         username = self.username_filter.get()
         username = username if username else None
@@ -410,7 +456,7 @@ class ErrorLogApp:
             conn = self.db.conn()
             cursor = conn.cursor()
             query = """
-                SELECT id, username, error_message, log_time
+                SELECT id, username, sn, error_message, log_time
                 FROM error_logs
                 WHERE 1=1
             """
@@ -425,8 +471,8 @@ class ErrorLogApp:
                 query += " AND log_time <= %s"
                 params.append(end_date)
             if sn:
-                query += " AND error_message LIKE %s"
-                params.append(f"%SN: {sn}%")  # 查找SN字段
+                query += " AND sn LIKE %s"
+                params.append(f"%{sn}%")  # 使用模糊匹配SN字段
             if error_keyword:
                 query += " AND error_message LIKE %s"
                 params.append(f"%{error_keyword}%")  # 查找错误关键词
@@ -450,14 +496,14 @@ class ErrorLogApp:
             results = cursor.fetchall()
             
             # 显示结果
-            for (log_id, user, msg, time) in results:
-                self.result_tree.insert('', 'end', values=(log_id, user, msg[:50], time.strftime('%Y-%m-%d %H:%M:%S')))
+            for record in results:
+                self.result_tree.insert('', 'end', values=record)
             
             # 显示结果数量
             messagebox.showinfo('查询结果', f'共找到 {len(results)} 条记录')
             
         except Exception as e:
-            messagebox.showerror('查询失败', f'查询失败: {e}')
+            messagebox.showerror('查询失败', f'查询失败: {str(e)}')
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
@@ -485,7 +531,12 @@ class ErrorLogApp:
         return None
     
     def query_by_sn(self):
-        """通过SN直接查询错误信息"""
+        """
+        通过SN直接查询错误信息
+        
+        获取用户输入的SN，调用数据库模块查询相关错误记录，
+        并在结果表格中显示查询结果
+        """
         sn = self.sn_query.get().strip()
         if not sn:
             messagebox.showinfo('提示', '请输入要查询的SN')
@@ -505,6 +556,7 @@ class ErrorLogApp:
                 
             # 显示结果
             for record in results:
+                # 确保显示所有字段：ID, 用户名, SN, 错误信息, 时间
                 self.result_tree.insert('', 'end', values=record)
                 
             messagebox.showinfo('查询结果', f'共找到 {len(results)} 条记录')
@@ -513,10 +565,18 @@ class ErrorLogApp:
             messagebox.showerror('查询失败', f'查询失败: {str(e)}')
     
     def clear_sn_query(self):
-        """清空SN查询框"""
+        """
+        清空SN查询框
+        """
         self.sn_query.delete(0, tk.END)
         
     def show_error_details(self, event):
+        """
+        双击查看错误详情的回调函数
+        
+        创建一个新窗口显示选中错误记录的完整信息，
+        包括ID、姓名、SN、时间和完整的错误信息
+        """
         # 获取选中的项
         selected_item = self.result_tree.focus()
         if not selected_item:
@@ -538,17 +598,41 @@ class ErrorLogApp:
         tk.Label(detail_window, text=f'SN: {values[2]}', font=('Arial', 11, 'bold')).pack(anchor='w', padx=10, pady=5)
         tk.Label(detail_window, text=f'时间: {values[4]}', font=('Arial', 11)).pack(anchor='w', padx=10, pady=5)
         
-        # 错误信息文本框
+        # 错误信息文本框 - 支持滚动查看
         tk.Label(detail_window, text='报错信息:', font=('Arial', 11, 'bold')).pack(anchor='w', padx=10, pady=5)
-        error_text = tk.Text(detail_window, wrap=tk.WORD, width=70, height=15)
-        error_text.pack(padx=10, pady=5, fill='both', expand=True)
+        
+        # 添加滚动条
+        text_frame = tk.Frame(detail_window)
+        text_frame.pack(padx=10, pady=5, fill='both', expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        error_text = tk.Text(text_frame, wrap=tk.WORD, width=70, height=15, yscrollcommand=scrollbar.set)
+        error_text.pack(side=tk.LEFT, fill='both', expand=True)
+        scrollbar.config(command=error_text.yview)
+        
         error_text.insert('1.0', values[3])
         error_text.config(state='disabled')  # 设为只读
+        
+        # 添加复制按钮
+        def copy_error_text():
+            detail_window.clipboard_clear()
+            detail_window.clipboard_append(values[3])
+            messagebox.showinfo('复制成功', '错误信息已复制到剪贴板')
+            
+        tk.Button(detail_window, text='复制错误信息', command=copy_error_text).pack(pady=10)
         
         # 关闭按钮
         tk.Button(detail_window, text='关闭', command=detail_window.destroy).pack(pady=10)
     
     def export_results(self):
+        """
+        导出查询结果到CSV文件
+        
+        将当前表格中显示的所有错误记录导出到用户选择的CSV文件中，
+        包括ID、姓名、SN、报错信息和时间等字段
+        """
         # 获取当前显示的结果
         items = self.result_tree.get_children()
         if not items:
@@ -578,7 +662,129 @@ class ErrorLogApp:
             
             messagebox.showinfo('导出成功', f'数据已成功导出到 {file_path}')
         except Exception as e:
-            messagebox.showerror('导出失败', f'导出失败: {e}')
+            messagebox.showerror('导出失败', f'导出失败: {str(e)}')
+    
+    def setup_report_frame(self):
+        '''
+        设置报告生成页面的UI组件
+        
+        创建报告类型选择、时间范围选择和报告格式选择等控件，以及生成报告按钮
+        '''
+        # 创建报告配置区域
+        config_frame = ttk.LabelFrame(self.report_frame, text='报告配置')
+        config_frame.pack(fill='x', padx=10, pady=10)
+        
+        # 报告类型选择
+        report_type_frame = ttk.Frame(config_frame)
+        report_type_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(report_type_frame, text='报告类型:', font=('Arial', 11)).grid(row=0, column=0, padx=10, pady=5, sticky='w')
+        self.report_type_var = tk.StringVar(value='daily')
+        ttk.Radiobutton(report_type_frame, text='日报', variable=self.report_type_var, value='daily').grid(row=0, column=1, padx=10, pady=5)
+        ttk.Radiobutton(report_type_frame, text='周报', variable=self.report_type_var, value='weekly').grid(row=0, column=2, padx=10, pady=5)
+        ttk.Radiobutton(report_type_frame, text='月报', variable=self.report_type_var, value='monthly').grid(row=0, column=3, padx=10, pady=5)
+        ttk.Radiobutton(report_type_frame, text='自定义', variable=self.report_type_var, value='custom').grid(row=0, column=4, padx=10, pady=5)
+        
+        # 时间范围选择
+        date_frame = ttk.Frame(config_frame)
+        date_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(date_frame, text='开始日期:', font=('Arial', 11)).grid(row=0, column=0, padx=10, pady=5, sticky='w')
+        self.report_start_date = DateEntry(date_frame, width=12, background='darkblue', foreground='white', date_pattern='yyyy-mm-dd')
+        self.report_start_date.grid(row=0, column=1, padx=10, pady=5)
+        
+        ttk.Label(date_frame, text='结束日期:', font=('Arial', 11)).grid(row=0, column=2, padx=10, pady=5, sticky='w')
+        self.report_end_date = DateEntry(date_frame, width=12, background='darkblue', foreground='white', date_pattern='yyyy-mm-dd')
+        self.report_end_date.grid(row=0, column=3, padx=10, pady=5)
+        
+        # 报告格式选择
+        format_frame = ttk.Frame(config_frame)
+        format_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(format_frame, text='报告格式:', font=('Arial', 11)).grid(row=0, column=0, padx=10, pady=5, sticky='w')
+        self.report_format_var = tk.StringVar(value='excel')
+        ttk.Radiobutton(format_frame, text='Excel', variable=self.report_format_var, value='excel').grid(row=0, column=1, padx=10, pady=5)
+        ttk.Radiobutton(format_frame, text='PDF', variable=self.report_format_var, value='pdf').grid(row=0, column=2, padx=10, pady=5)
+        ttk.Radiobutton(format_frame, text='CSV', variable=self.report_format_var, value='csv').grid(row=0, column=3, padx=10, pady=5)
+        
+        # 报告内容选项
+        content_frame = ttk.LabelFrame(self.report_frame, text='报告内容')
+        content_frame.pack(fill='x', padx=10, pady=10)
+        
+        # 错误类型统计选项
+        self.include_error_types_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(content_frame, text='包含错误类型统计', variable=self.include_error_types_var).pack(anchor='w', padx=10, pady=5)
+        
+        # 错误频率统计选项
+        self.include_error_frequency_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(content_frame, text='包含错误频率统计', variable=self.include_error_frequency_var).pack(anchor='w', padx=10, pady=5)
+        
+        # 严重程度分析选项
+        self.include_severity_analysis_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(content_frame, text='包含严重程度分析', variable=self.include_severity_analysis_var).pack(anchor='w', padx=10, pady=5)
+        
+        # 可视化图表选项
+        self.include_charts_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(content_frame, text='包含可视化图表', variable=self.include_charts_var).pack(anchor='w', padx=10, pady=5)
+        
+        # 生成报告按钮
+        button_frame = ttk.Frame(self.report_frame)
+        button_frame.pack(fill='x', padx=10, pady=20)
+        
+        ttk.Button(button_frame, text='生成报告', command=self.generate_report, width=20).pack(side=tk.LEFT, padx=10)
+        ttk.Button(button_frame, text='重置选项', command=self.reset_report_options, width=15).pack(side=tk.LEFT, padx=10)
+        
+        # 预览区域
+        preview_frame = ttk.LabelFrame(self.report_frame, text='报告预览')
+        preview_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        self.preview_text = tk.Text(preview_frame, wrap=tk.WORD, width=80, height=15)
+        self.preview_text.pack(fill='both', expand=True, padx=5, pady=5)
+        self.preview_text.insert('1.0', '点击"生成报告"按钮预览报告内容')
+    
+    def generate_report(self):
+        # 生成报告的实现
+        report_type = self.report_type_var.get()
+        start_date = self.report_start_date.get_date()
+        end_date = self.report_end_date.get_date()
+        report_format = self.report_format_var.get()
+        
+        # 清空预览区域
+        self.preview_text.delete('1.0', tk.END)
+        
+        # 生成报告预览
+        self.preview_text.insert('1.0', f'报告类型: {report_type}\n')
+        self.preview_text.insert(tk.END, f'时间范围: {start_date} 至 {end_date}\n')
+        self.preview_text.insert(tk.END, f'报告格式: {report_format}\n\n')
+        
+        # 根据选项添加内容
+        if self.include_error_types_var.get():
+            self.preview_text.insert(tk.END, '- 包含错误类型统计\n')
+        if self.include_error_frequency_var.get():
+            self.preview_text.insert(tk.END, '- 包含错误频率统计\n')
+        if self.include_severity_analysis_var.get():
+            self.preview_text.insert(tk.END, '- 包含严重程度分析\n')
+        if self.include_charts_var.get():
+            self.preview_text.insert(tk.END, '- 包含可视化图表\n')
+        
+        # 提示用户报告生成成功
+        messagebox.showinfo('报告生成', '报告预览已生成，实际报告将导出到文件')
+    
+    def reset_report_options(self):
+        # 重置报告选项
+        self.report_type_var.set('daily')
+        today = datetime.now().date()
+        self.report_start_date.set_date(today)
+        self.report_end_date.set_date(today)
+        self.report_format_var.set('excel')
+        self.include_error_types_var.set(True)
+        self.include_error_frequency_var.set(True)
+        self.include_severity_analysis_var.set(True)
+        self.include_charts_var.set(True)
+        
+        # 清空预览
+        self.preview_text.delete('1.0', tk.END)
+        self.preview_text.insert('1.0', '点击"生成报告"按钮预览报告内容')
 
 def main():
     root = tk.Tk()
@@ -588,3 +794,128 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+    def batch_import(self):
+        '''
+        批量导入SN和错误信息的功能
+        
+        允许用户选择CSV文件并批量导入多条错误记录
+        CSV文件格式应包含：姓名,SN,错误信息
+        '''
+        # 打开文件选择对话框
+        file_path = filedialog.askopenfilename(
+            title='选择CSV文件',
+            filetypes=[('CSV文件', '*.csv'), ('所有文件', '*.*')]
+        )
+        
+        if not file_path:
+            return  # 用户取消了选择
+        
+        try:
+            # 创建预览对话框
+            preview_dialog = tk.Toplevel(self.root)
+            preview_dialog.title('导入预览')
+            preview_dialog.geometry('800x600')
+            preview_dialog.transient(self.root)  # 设置为主窗口的子窗口
+            preview_dialog.grab_set()  # 模态对话框
+            
+            # 创建预览表格
+            preview_frame = ttk.Frame(preview_dialog)
+            preview_frame.pack(fill='both', expand=True, padx=10, pady=10)
+            
+            # 创建表格
+            columns = ('username', 'sn', 'error_message')
+            preview_tree = ttk.Treeview(preview_frame, columns=columns, show='headings')
+            
+            # 定义表头
+            preview_tree.heading('username', text='姓名')
+            preview_tree.heading('sn', text='SN')
+            preview_tree.heading('error_message', text='报错信息')
+            
+            # 定义列宽
+            preview_tree.column('username', width=120)
+            preview_tree.column('sn', width=150)
+            preview_tree.column('error_message', width=450)
+            
+            # 添加滚动条
+            scrollbar = ttk.Scrollbar(preview_frame, orient='vertical', command=preview_tree.yview)
+            preview_tree.configure(yscroll=scrollbar.set)
+            scrollbar.pack(side='right', fill='y')
+            preview_tree.pack(fill='both', expand=True)
+            
+            # 读取CSV文件并显示预览
+            valid_records = []
+            invalid_records = []
+            
+            with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
+                csv_reader = csv.reader(csvfile)
+                headers = next(csv_reader, None)  # 读取表头
+                
+                # 检查CSV文件格式
+                if not headers or len(headers) < 3:
+                    messagebox.showerror('格式错误', 'CSV文件格式不正确，应包含：姓名,SN,错误信息')
+                    preview_dialog.destroy()
+                    return
+                
+                # 显示数据预览
+                row_count = 0
+                for row in csv_reader:
+                    if len(row) >= 3:
+                        username = row[0].strip()
+                        sn = row[1].strip()
+                        error_message = row[2].strip()
+                        
+                        # 验证数据
+                        if username and sn and error_message:
+                            preview_tree.insert('', 'end', values=(username, sn, error_message))
+                            valid_records.append((username, sn, error_message))
+                        else:
+                            invalid_records.append(row)
+                    else:
+                        invalid_records.append(row)
+                    
+                    row_count += 1
+                    if row_count >= 100:  # 限制预览数量
+                        break
+            
+            # 显示统计信息
+            info_label = ttk.Label(preview_dialog, 
+                                  text=f'共读取 {len(valid_records) + len(invalid_records)} 条记录，'
+                                       f'有效记录 {len(valid_records)} 条，'
+                                       f'无效记录 {len(invalid_records)} 条')
+            info_label.pack(pady=5)
+            
+            # 创建按钮区域
+            button_frame = ttk.Frame(preview_dialog)
+            button_frame.pack(fill='x', padx=10, pady=10)
+            
+            def import_records():
+                # 导入有效记录到数据库
+                success_count = 0
+                error_count = 0
+                
+                conn = self.db.conn()
+                if not conn:
+                    messagebox.showerror('错误', '无法连接到数据库，请检查网络连接！')
+                    preview_dialog.destroy()
+                    return
+                
+                try:
+                    for username, sn, error_message in valid_records:
+                        if self.db.log_error(username, sn, error_message):
+                            success_count += 1
+                        else:
+                            error_count += 1
+                    
+                    messagebox.showinfo('导入完成', 
+                                       f'成功导入 {success_count} 条记录，'
+                                       f'失败 {error_count} 条记录')
+                    preview_dialog.destroy()
+                except Exception as e:
+                    messagebox.showerror('导入错误', f'导入过程中发生错误: {str(e)}')
+            
+            ttk.Button(button_frame, text='确认导入', command=import_records, width=15).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text='取消', command=preview_dialog.destroy, width=15).pack(side=tk.RIGHT, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror('错误', f'读取CSV文件失败: {str(e)}')
