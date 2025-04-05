@@ -1,13 +1,52 @@
+# -*- coding: utf-8 -*-
+'''
+数据库模块 - 负责所有数据库操作
+
+本模块封装了所有与MySQL数据库的交互操作，包括：
+- 数据库连接管理
+- 错误日志记录
+- 用户认证和管理
+- 数据查询和筛选
+'''
+
+# -*- coding: utf-8 -*-
+'''
+数据库模块 - 负责所有数据库操作
+
+本模块封装了所有与MySQL数据库的交互操作，包括：
+- 数据库连接管理
+- 错误日志记录
+- 用户认证和管理
+- 数据查询和筛选
+'''
+
 import mysql.connector
 from datetime import datetime
 from mysql.connector import Error   # 确保正确导入异常类
 
 class DBManager:
+    '''
+    数据库管理类 - 处理所有数据库操作
+    
+    属性:
+        connection: MySQL数据库连接对象
+    '''
+    
     def __init__(self):
+        '''
+        初始化数据库管理器并创建错误日志表
+        '''
         self.connection = self.conn()  # 初始化连接
         self.create_error_table()
+        self.create_users_table()
 
     def conn(self):
+        '''
+        创建并返回数据库连接
+        
+        返回:
+            connection: MySQL数据库连接对象，连接失败则返回None
+        '''
         try:
             return mysql.connector.connect(
                 host='110.41.57.192',
@@ -21,12 +60,16 @@ class DBManager:
             return None
 
     def create_error_table(self):
+        '''
+        创建错误日志表，如果表不存在
+        表结构包含ID、用户名、SN、错误信息和记录时间
+        '''
         conn = None
         cursor = None
         try:
             conn = self.conn()
             cursor = conn.cursor()
-            # 修改表结构，添加sn字段，方便直接通过SN查询
+            # 创建错误日志表，添加sn字段用于直接查询
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS error_logs (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -38,7 +81,32 @@ class DBManager:
                 )
             ''')
             conn.commit()
-            print("表创建成功")
+        except mysql.connector.Error as e:
+            print(f"建表失败: {e}")
+        finally:
+            if cursor: cursor.close()
+            if conn and conn.is_connected(): conn.close()
+            
+    def create_users_table(self):
+        '''
+        创建用户表，如果表不存在
+        表结构包含用户名、密码和注册时间
+        '''
+        conn = None
+        cursor = None
+        try:
+            conn = self.conn()
+            cursor = conn.cursor()
+            # 创建用户表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS USERS (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user VARCHAR(255) UNIQUE,
+                    password VARCHAR(255),
+                    time DATETIME
+                )
+            ''')
+            conn.commit()
         except mysql.connector.Error as e:
             print(f"建表失败: {e}")
         finally:
@@ -46,90 +114,186 @@ class DBManager:
             if conn and conn.is_connected(): conn.close()
 
     def log_error(self, username, sn, error_msg):
+        '''
+        记录错误信息到数据库
+        
+        参数:
+            username: 用户名
+            sn: 设备序列号
+            error_msg: 错误信息
+            
+        返回:
+            bool: 写入成功返回True，失败返回False
+        '''
         conn = None
         cursor = None
         try:
             conn = self.conn()
             cursor = conn.cursor()
-            # 添加sn字段，单独存储SN信息
+            # 添加错误日志记录
             query = """INSERT INTO error_logs 
                     (username, sn, error_message, log_time) 
                     VALUES (%s, %s, %s, %s)"""
             values = (username, sn, error_msg, datetime.now())
             cursor.execute(query, values)
             conn.commit()
-            print("日志写入成功")
+            return True
         except mysql.connector.Error as e:
             print(f"写入失败: {e}")
+            return False
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
-
-    def view_logs(self):
+            
+    def verify_user(self, username, password):
+        '''
+        验证用户登录信息
+        
+        参数:
+            username: 用户名
+            password: 密码
+            
+        返回:
+            bool: 验证成功返回True，失败返回False
+        '''
         conn = None
         cursor = None
         try:
             conn = self.conn()
             cursor = conn.cursor()
-            # 使用正确的字段名称log_time
-            cursor.execute("""
-                SELECT id, username, error_message, log_time 
-                FROM error_logs 
-                ORDER BY log_time DESC
-            """)
-            results = cursor.fetchall()
-
-            print("\n错误日志：")
-            print("{:<5} {:<15} {:<30} {:<20}".format(
-                "ID", "用户名", "错误信息", "时间"))
-            for (log_id, user, msg, time) in results:
-                print(f"{log_id:<5} {user:<15} {msg[:25]:<30} {time.strftime('%Y-%m-%d %H:%M:%S'):<20}")
-
+            cursor.execute('SELECT user, password FROM USERS WHERE user = %s', (username,))
+            result = cursor.fetchone()
+            
+            if result and result[1] == password:
+                return True
+            return False
         except mysql.connector.Error as e:
-            print(f"查询失败: {e}")
+            print(f"验证用户失败: {e}")
+            return False
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
-    #按条件筛选日志
-    def view_logs_by_filter(self,username=None,start_date=None,end_date=None,limit=100):
-        conn=None
-        cursor=None
+
+    def add_user(self, username, password):
+        '''
+        添加新用户
+        
+        参数:
+            username: 用户名
+            password: 密码
+            
+        返回:
+            bool: 添加成功返回True，失败返回False
+        '''
+        conn = None
+        cursor = None
         try:
-            conn=self.conn()
-            cursor=conn.cursor()
-            query="""
-                SELECT id,username,error_message,log_time
+            conn = self.conn()
+            cursor = conn.cursor()
+            
+            # 检查用户是否已存在
+            cursor.execute('SELECT user FROM USERS WHERE user = %s', (username,))
+            if cursor.fetchone():
+                return False  # 用户已存在
+                
+            # 添加新用户
+            sql = 'INSERT INTO USERS(user, password, time) VALUES(%s, %s, %s)'
+            values = (username, password, datetime.now())
+            cursor.execute(sql, values)
+            conn.commit()
+            return True
+        except mysql.connector.Error as e:
+            print(f"添加用户失败: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn and conn.is_connected(): conn.close()
+
+    def view_logs(self, limit=100):
+        '''
+        查看最近的错误日志
+        
+        参数:
+            limit: 返回的最大记录数
+            
+        返回:
+            list: 错误日志记录列表
+        '''
+        conn = None
+        cursor = None
+        try:
+            conn = self.conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, username, sn, error_message, log_time 
+                FROM error_logs 
+                ORDER BY log_time DESC
+                LIMIT %s
+            """, (limit,))
+            return cursor.fetchall()
+        except mysql.connector.Error as e:
+            print(f"查询失败: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn and conn.is_connected(): conn.close()
+    def view_logs_by_filter(self, username=None, start_date=None, end_date=None, limit=100):
+        '''
+        按条件筛选错误日志
+        
+        参数:
+            username: 用户名筛选
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 返回的最大记录数
+            
+        返回:
+            list: 筛选后的错误日志记录列表
+        '''
+        conn = None
+        cursor = None
+        try:
+            conn = self.conn()
+            cursor = conn.cursor()
+            query = """
+                SELECT id, username, sn, error_message, log_time
                 FROM error_logs
                 WHERE 1=1
             """
-            params=[]
+            params = []
+            
+            # 添加筛选条件
             if username:
-                query+=" AND username=%s"
-                params.append(username)
+                query += " AND username LIKE %s"
+                params.append(f"%{username}%")  # 使用模糊匹配
             if start_date:
-                query+=" AND log_time>=%s"
+                query += " AND log_time >= %s"
                 params.append(start_date)
             if end_date:
-                query+=" AND log_time<=%s"
+                query += " AND log_time <= %s"
                 params.append(end_date)
-            query+=" ORDER BY log_time DESC LIMIT %s"
+                
+            query += " ORDER BY log_time DESC LIMIT %s"
             params.append(limit)
 
-            cursor.execute(query,tuple(params))
-            results=cursor.fetchall()
-
-            print("\n错误日志：")
-            print("{:<5} {:<15} {:<30} {:<20}".format("ID", "用户名", "错误信息", "时间"))
-            for (log_id,user,msg,time) in results:
-                print(f"{log_id:<5} {user:<15} {msg[:25]:<30} {time.strftime('%Y-%m-%d %H:%M:%S'):<20}")
-
+            cursor.execute(query, tuple(params))
+            return cursor.fetchall()
         except mysql.connector.Error as e:
-            print(f"查询失败：{e}")
+            print(f"查询失败: {e}")
+            return []
         finally:
             if cursor: cursor.close()
             if conn and conn.is_connected(): conn.close()
     def get_error_by_sn(self, sn):
-        """通过SN直接查询错误信息"""
+        '''
+        通过SN直接查询错误信息
+        
+        参数:
+            sn: 设备序列号
+            
+        返回:
+            list: 包含该SN的错误记录列表
+        '''
         conn = None
         cursor = None
         try:
@@ -142,6 +306,76 @@ class DBManager:
                 ORDER BY log_time DESC
             """
             cursor.execute(query, (sn,))
+            return cursor.fetchall()
+        except mysql.connector.Error as e:
+            print(f"查询失败: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conn and conn.is_connected(): conn.close()
+
+    def filter_logs_advanced(self, username=None, sn=None, error_keyword=None, 
+                           start_date=None, end_date=None, sort_option='time_desc', limit=100):
+        '''
+        高级筛选错误日志
+        
+        参数:
+            username: 用户名筛选
+            sn: 设备序列号
+            error_keyword: 错误信息关键词
+            start_date: 开始日期
+            end_date: 结束日期
+            sort_option: 排序选项 (time_desc, time_asc, id_desc, id_asc)
+            limit: 返回的最大记录数
+            
+        返回:
+            list: 筛选后的错误日志记录列表
+        '''
+        conn = None
+        cursor = None
+        try:
+            conn = self.conn()
+            cursor = conn.cursor()
+            query = """
+                SELECT id, username, sn, error_message, log_time
+                FROM error_logs
+                WHERE 1=1
+            """
+            params = []
+            
+            # 添加筛选条件
+            if username:
+                query += " AND username LIKE %s"
+                params.append(f"%{username}%")  # 使用模糊匹配
+            if start_date:
+                query += " AND log_time >= %s"
+                params.append(start_date)
+            if end_date:
+                query += " AND log_time <= %s"
+                params.append(end_date)
+            if sn:
+                query += " AND sn LIKE %s"
+                params.append(f"%{sn}%")  # 查找SN字段
+            if error_keyword:
+                query += " AND error_message LIKE %s"
+                params.append(f"%{error_keyword}%")  # 查找错误关键词
+            
+            # 根据排序选项设置排序方式
+            if sort_option == 'time_desc':
+                query += " ORDER BY log_time DESC"
+            elif sort_option == 'time_asc':
+                query += " ORDER BY log_time ASC"
+            elif sort_option == 'id_desc':
+                query += " ORDER BY id DESC"
+            elif sort_option == 'id_asc':
+                query += " ORDER BY id ASC"
+            else:
+                query += " ORDER BY log_time DESC"
+                
+            query += " LIMIT %s"
+            params.append(limit)
+            
+            cursor.execute(query, tuple(params))
             return cursor.fetchall()
         except mysql.connector.Error as e:
             print(f"查询失败: {e}")
